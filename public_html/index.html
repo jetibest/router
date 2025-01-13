@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="html.js"></script>
+    <title>Router</title>
+</head>
+<body>
+<main></main>
+<script>
+async function apiRequest(url, params)
+{
+    try
+    {
+        var method = 'POST';
+        var body = null;
+        if(typeof params === 'undefined')
+        {
+            method = 'GET';
+        }
+        else
+        {
+            body = JSON.stringify(params);
+        }
+        
+        var response = await fetch(url, {
+            method: method,
+            body: body,
+            cache: 'no-store'
+        });
+        
+        // test unauthorized
+        if(!response.ok && response.status === 401) return [null, 'no-login'];
+        
+        // test any other error
+        if(!response.ok) throw new Error(await response.text() || response.statusText);
+        
+        var result = null;
+        try
+        {
+            result = await response.json();
+        }
+        catch(ignore) {}
+        
+        return [result, null];
+    }
+    catch(err)
+    {
+        console.error(err);
+        return [null, err];
+    }
+}
+function Popup(fn)
+{
+    var close = () =>
+    {
+        if(!container.element.isConnected) return;
+        container.element.parentNode.removeChild(container.element);
+    };
+    
+    var show = () => container.appendTo(document.body);
+    
+    var container = html.$.div(
+        {
+            className: html.css(`
+                position: fixed;
+                overflow: auto;
+                left: 0px;
+                top: 0px;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 40px;
+                box-sizing: border-box;
+            `)
+        },
+        html.$.div(
+            {
+                className: html.css(`
+                    position: relative;
+                    overflow: visible;
+                    background-color: #fff;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: stretch;
+                `)
+            },
+            html.$.button(
+                {
+                    type: 'button',
+                    onclick: close,
+                    className: html.css(`
+                        position: absolute;
+                        left: auto;
+                        right: 0px;
+                        top: 0px;
+                        transform: translateY(-100%);
+                    `)
+                },
+                'X'
+            ),
+            fn(close)
+        )
+    );
+    
+    setTimeout(show);
+}
+function LoginForm(options, cb)
+{
+    options = options || {};
+    
+    var pw;
+    var feedback, feedback_text;
+    return html.$.div(
+        'Toegang vereist',
+        html.$.dl(
+            html.$.dt('Wachtwoord:'),
+            html.$.dd(
+                pw = html.$.input(
+                {
+                    type: 'password'
+                }
+            ))
+        ),
+        feedback = html.$.div(() => feedback_text),
+        html.$.button(
+            {
+                type: 'button',
+                onclick: async () =>
+                {
+                    feedback_text = null;
+                    feedback.render();
+                    
+                    var password = pw.element.value.trim();
+                    
+                    if(!password) return;
+                    
+                    var [_, err] = await apiRequest('login', {
+                        password: password
+                    });
+                    
+                    if(err)
+                    {
+                        feedback_text = 'Kon niet inloggen, probeer opnieuw (' + err + ').';
+                        feedback.render();
+                        pw.element.focus();
+                    }
+                    else
+                    {
+                        cb();
+                    }
+                }
+            },
+            'Inloggen'
+        )
+    );
+}
+function SetRoute(options, cb)
+{
+    options = options || {};
+    
+    var route = options.route || {};
+    route.path = route.path || '';
+    route.backend = route.backend || '';
+    route.allowedIPs = route.allowedIPs || ['*'];
+    
+    var exists = !!options.route;
+    var newRoute = JSON.parse(JSON.stringify(route));
+    
+    var feedback, feedback_text;
+    return html.$.div(
+        exists ? html.$.button(
+            {
+                type: 'button',
+                onclick: () =>
+                {
+                    Popup(close =>
+                    {
+                        return DeleteRoute({route: route}, () =>
+                        {
+                            close();
+                            cb();
+                        });
+                    });
+                }
+            },
+            'Verwijderen'
+        ) : null,
+        html.$.dl(
+            html.$.dt('Pad:'),
+            html.$.dd(
+                exists ? route.path : html.$.input(
+                    {
+                        type: 'text',
+                        value: route.path,
+                        onchange: function()
+                        {
+                            newRoute.path = this.element.value.trim();
+                        }
+                    }
+                )
+            ),
+            html.$.dt('Backend:'),
+            html.$.dd(
+                html.$.input(
+                    {
+                        type: 'text',
+                        value: route.backend,
+                        onchange: function()
+                        {
+                            newRoute.backend = this.element.value.trim();
+                        }
+                    }
+                )
+            ),
+            html.$.dt('IP-adres whitelist:'),
+            html.$.dd(
+                html.$.input(
+                    {
+                        type: 'text',
+                        value: route.allowedIPs.join(', '),
+                        onchange: function()
+                        {
+                            newRoute.allowedIPs = this.element.value.split(',').map(v => v.trim()).filter(v => v);
+                        }
+                    }
+                )
+            )
+        ),
+        feedback = html.$.div(() => feedback_text),
+        html.$.button(
+            {
+                onclick: async () =>
+                {
+                    feedback_text = '';
+                    feedback.render();
+                    
+                    if(!newRoute.path) return;
+                    if(!newRoute.backend) return;
+                    
+                    var [_, err] = await apiRequest('set-route', {
+                        route: newRoute
+                    });
+                    
+                    if(err)
+                    {
+                        feedback_text = 'Kon niet inloggen, probeer opnieuw (' + err + ').';
+                        feedback.render();
+                    }
+                    else
+                    {
+                        cb();
+                    }
+                }
+            },
+            exists ? 'Opslaan' : 'Toevoegen'
+        )
+    );
+}
+function DeleteRoute(options, cb)
+{
+    options = options || {};
+    
+    var route = options.route || {};
+    route.path = route.path || '';
+    
+    var feedback, feedback_text;
+    
+    return html.$.div(
+        'Weet je zeker dat je deze route wilt verwijderen?',
+        feedback = html.$.div(() => feedback_text),
+        html.$.button(
+            {
+                type: 'button',
+                onclick: async () =>
+                {
+                    var [_, err] = await apiRequest('delete-route', {
+                        path: route.path
+                    });
+                    
+                    if(err)
+                    {
+                        feedback_text = 'Kon niet verwijderen, probeer opnieuw (' + err + ').';
+                        feedback.render();
+                    }
+                    else
+                    {
+                        cb();
+                    }
+                }
+            },
+            'Ja, verwijderen'
+        )
+    );
+}
+function Routes(options, cb)
+{
+    options = options || {};
+    
+    var routes = options.routes || [];
+    
+    return html.$.div(
+        html.$.h3('Routes:'),
+        routes.length === 0 ? 'Er zijn nog geen routes toegevoegd.' : null,
+        routes.map(
+            route => html.$.div(
+                (route.path || '?') + ' --> ' + (route.backend || '?') + ' (' + (route.allowedIPs || ['*']).join(', ') + ')',
+                html.$.button(
+                    {
+                        type: 'button',
+                        onclick: () =>
+                        {
+                            Popup(close =>
+                            {
+                                return SetRoute({route: route}, () =>
+                                {
+                                    close();
+                                    cb();
+                                });
+                            });
+                        }
+                    },
+                    'Aanpassen'
+                )
+            )
+        ),
+        html.$.br(), html.$.br(),
+        html.$.button(
+            {
+                type: 'button',
+                onclick: () =>
+                {
+                    Popup(close =>
+                        SetRoute({}, () =>
+                        {
+                            close();
+                            cb();
+                        })
+                    );
+                }
+            },
+            'Nieuwe route...'
+        )
+    );
+}
+function Main()
+{
+    var container, out = 'Laden...';
+    
+    async function update()
+    {
+        var [routesResponse, err] = await apiRequest('list-routes');
+        if(err)
+        {
+            if(err === 'no-login')
+            {
+                out = LoginForm({}, update);
+            }
+            else
+            {
+                out = html.$.div(
+                    'Fout bij laden (' + err + ').',
+                    html.$.button(
+                        {
+                            type: 'button',
+                            onclick: () =>
+                            {
+                                out = 'Laden...';
+                                container.render();
+                                
+                                update();
+                            }
+                        },
+                        'Opnieuw proberen'
+                    )
+                );
+            }
+        }
+        else
+        {
+            var feedback, feedback_text;
+            
+            out = html.$.div(
+                'Ingelogd als beheerder, ',
+                feedback = html.$.span(() => feedback_text),
+                html.$.button(
+                    {
+                        type: 'button',
+                        onclick: async () =>
+                        {
+                            feedback_text = null;
+                            feedback.render();
+                            
+                            var [_, err] = await apiRequest('logout');
+                            if(err)
+                            {
+                                feedback_text = 'Fout bij uitloggen: ' + err;
+                                feedback.render();
+                            }
+                            else
+                            {
+                                out = 'Laden...';
+                                container.render();
+                                
+                                update();
+                            }
+                        }
+                    },
+                    'Uitloggen'
+                ),
+                html.$.br(),
+                Routes(
+                    {
+                        routes: routesResponse?.value || []
+                    },
+                    update
+                )
+            );
+        }
+        
+        container.render();
+    }
+    setTimeout(update);
+    
+    return container = html.$.div(() => out);
+}
+Main().render(document.querySelector('main'));
+</script>
+</body>
+</html>
